@@ -57,6 +57,56 @@ class Submission(db.Model):
     signature=db.Column(db.String(160),nullable=False)
     created_at=db.Column(db.DateTime,default=datetime.datetime.utcnow,nullable=False)
 
+# Additional medication competency assessments are stored separately so existing spot checks remain unchanged.
+MEDICATION_SECTIONS = [
+    ('Training and Policy', [
+        'Has the staff member completed the medication training set out by Love Hands Care?',
+        'Has the staff member read the medication policy and signed to indicate they have done so?',
+        'Does the staff member know how to access the medication policy should they need to?'
+    ]),
+    ('Administration of Medication', [
+        'Did the staff member wash their hands or sanitize before putting on their gloves?',
+        'Did the staff member ask for the client’s consent to do their medication?',
+        'Has the staff member checked the MAR chart to make sure they are giving the correct medication and the correct dose at the right time?',
+        'Did the staff member offer the client a drink to use to take their medication?',
+        'Did the staff member observe the client taking their medication?',
+        'Did the staff member record using the correct codes on the MAR chart?',
+        'If the medication was not given, has the staff member recorded this correctly and raised a concern?',
+        'Are there sufficient amounts of medication for the client’s needs?',
+        'Is the medication stored safely?',
+        'Has the staff member returned any medication to the fridge if needed?',
+        'Is there any excess medication on the premises?',
+        'Does the client take any PRN medication?',
+        'Has the staff member recorded this correctly?',
+        'Did the staff member remove their PPE in the correct way?',
+        'Did the staff member wash their hands or sanitize after removing their gloves?',
+        'Does the staff member know who to contact with any medication concerns?',
+        'Can the staff member describe what to do if there is a medication error?',
+        'Can the staff member describe what they do if they find a medication error by another care staff member?'
+    ])
+]
+MEDICATION_OUTCOMES = [
+    'Do you consider the staff member to be competent to deliver medication?',
+    'Do you feel the staff member needs any extra training or to redo their training?',
+    'Was the staff member able to answer the questions regarding errors?'
+]
+
+class MedicationSubmission(db.Model):
+    __tablename__ = 'medication_submission'
+    id=db.Column(db.Integer,primary_key=True)
+    assessor_id=db.Column(db.Integer,db.ForeignKey('user.id'),nullable=False)
+    assessor=db.relationship('User')
+    staff_name=db.Column(db.String(160),nullable=False)
+    assessment_date=db.Column(db.String(20),nullable=False)
+    answers=db.Column(db.Text,nullable=False)
+    notes=db.Column(db.Text,nullable=False,default='')
+    outcomes=db.Column(db.Text,nullable=False)
+    assessor_name=db.Column(db.String(160),nullable=False)
+    assessor_signature=db.Column(db.String(160),nullable=False)
+    staff_signature=db.Column(db.String(160),nullable=False)
+    next_assessment=db.Column(db.String(20),nullable=False)
+    created_at=db.Column(db.DateTime,default=datetime.datetime.utcnow,nullable=False)
+
 with app.app_context(): db.create_all()
 
 def csrf():
@@ -236,5 +286,74 @@ def export_csv():
 
 @app.route('/health')
 def health():return 'OK',200
+
+
+
+@app.route('/medication/new',methods=['GET','POST'])
+@logged_in
+def new_medication():
+    user=db.session.get(User,session['uid'])
+    if request.method=='POST':
+        required=('staff_name','assessment_date','assessor_name','assessor_signature','staff_signature','next_assessment')
+        if any(not request.form.get(name,'').strip() for name in required):
+            flash('Complete all required details, including names, signatures and next assessment date.','error')
+        else:
+            answers=[]
+            for si,(section,questions) in enumerate(MEDICATION_SECTIONS):
+                for qi,question in enumerate(questions):
+                    val=request.form.get(f'm_{si}_{qi}','')
+                    allowed=('Yes','No','N/A') if (si,qi)==(1,9) else ('Yes','No')
+                    if val not in allowed:
+                        flash('Please answer every medication question.','error')
+                        return render_template('medication_form.html',user=user,sections=MEDICATION_SECTIONS,outcome_questions=MEDICATION_OUTCOMES)
+                    answers.append({'section':section,'question':question,'answer':val})
+            outcomes=[]
+            for i,question in enumerate(MEDICATION_OUTCOMES):
+                val=request.form.get(f'outcome_{i}','')
+                if val not in ('Yes','No'):
+                    flash('Complete all three competency outcome questions.','error')
+                    return render_template('medication_form.html',user=user,sections=MEDICATION_SECTIONS,outcome_questions=MEDICATION_OUTCOMES)
+                outcomes.append({'question':question,'answer':val,'signed':request.form.get(f'outcome_signed_{i}','').strip()[:160]})
+            record=MedicationSubmission(
+                assessor_id=user.id,staff_name=request.form['staff_name'].strip()[:160],
+                assessment_date=request.form['assessment_date'],answers=json.dumps(answers),
+                notes=request.form.get('notes','').strip()[:10000],outcomes=json.dumps(outcomes),
+                assessor_name=request.form['assessor_name'].strip()[:160],
+                assessor_signature=request.form['assessor_signature'].strip()[:160],
+                staff_signature=request.form['staff_signature'].strip()[:160],
+                next_assessment=request.form['next_assessment'])
+            db.session.add(record);db.session.commit()
+            flash(f'Medication competency #{record.id} submitted successfully.','success')
+            return redirect(url_for('medication_records'))
+    return render_template('medication_form.html',user=user,sections=MEDICATION_SECTIONS,outcome_questions=MEDICATION_OUTCOMES)
+
+@app.route('/medication/records')
+@logged_in
+def medication_records():
+    u=db.session.get(User,session['uid'])
+    q=MedicationSubmission.query
+    if u.role!='admin': q=q.filter_by(assessor_id=u.id)
+    records=q.order_by(MedicationSubmission.created_at.desc()).all()
+    return render_template('medication_records.html',records=records,admin=u.role=='admin')
+
+@app.route('/medication/<int:record_id>')
+@logged_in
+def medication_detail(record_id):
+    record=db.session.get(MedicationSubmission,record_id)
+    if not record:abort(404)
+    u=db.session.get(User,session['uid'])
+    if u.role!='admin' and record.assessor_id!=u.id:abort(403)
+    return render_template('medication_detail.html',record=record,answers=json.loads(record.answers),outcomes=json.loads(record.outcomes))
+
+@app.route('/admin/medication-export.csv')
+@admin_only
+def medication_export_csv():
+    output=io.StringIO();writer=csv.writer(output)
+    writer.writerow(['ID','Submitted at UTC','Assessment date','Staff assessed','Assessor','Competent','Extra training','Understands errors','Next assessment'])
+    for r in MedicationSubmission.query.order_by(MedicationSubmission.id.asc()).all():
+        outcomes=json.loads(r.outcomes)
+        writer.writerow([r.id,r.created_at.isoformat(),r.assessment_date,r.staff_name,r.assessor_name,
+                         outcomes[0]['answer'],outcomes[1]['answer'],outcomes[2]['answer'],r.next_assessment])
+    return Response(output.getvalue(),mimetype='text/csv',headers={'Content-Disposition':'attachment; filename=lovehands-medication-competency-summary.csv'})
 
 if __name__=='__main__': app.run(debug=os.environ.get('FLASK_DEBUG')=='1')

@@ -43,3 +43,15 @@ Open `http://127.0.0.1:5000/setup` and use the generated setup token.
 - This is a functional starter application, not an independently security-audited production medical/care record system. Before operational use, set up backups, a data retention and deletion policy, an access review process, a privacy notice, appropriate UK GDPR security procedures, incident response and hosting / processor agreements. For care records, confirm where data is stored and appropriate UK GDPR safeguards.
 - Automated email password resets, advanced MFA, audit event logs, role-level reporting, full CSV response export and signed-image capture are not included in this version. Admins can issue new passwords via User Management.
 - First section question wording was restored as a practical default because the provided DOCX extract did not contain readable text for that section. Review those four questions against your authoritative original form before real-world use.
+
+
+## Additional form: Staff Practical Medication Competency
+
+This release adds a second questionnaire without changing the Spot Check or existing login routes. Existing administrator and assessor accounts remain in the same `user` table, and original spot-check submissions remain in the `submission` table. The new `medication_submission` table is created automatically on startup using `db.create_all()`. **Keep the existing Render `DATABASE_URL`, `SECRET_KEY`, and other environment variables unchanged.** Do not reset or replace your PostgreSQL database.
+
+- `/medication/new` — medication assessment form (signed-in assessors or administrators)
+- `/medication/records` — own records for assessors; all records for administrators
+- `/medication/<id>` — authorised record detail and print view
+- `/admin/medication-export.csv` — administrator-only export
+
+The form follows the uploaded three-page medication assessment, including training/policy, 18 practical medication questions, staff conversation, three competency outcomes, typed acknowledgements, and next assessment date. Typed signatures are not cryptographically verified digital signatures. As with the original package, complete security, data protection and deployment testing before recording real service-user data.
