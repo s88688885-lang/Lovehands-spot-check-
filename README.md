@@ -4,10 +4,38 @@ A secure, role-based Spot Check questionnaire system for Lovehands Care Services
 
 ## First-time administrator login
 
+
+<div class="company-brand">
+  <img
+    src="/static/logo.png"
+    alt="Lovehands Care Services Logo"
+    class="company-logo"
+  >
+  <h2>Lovehands Care Services Limited</h2>
+</div>
+
 - Username: `admin`
 - Password: **You create this during setup. There is no preset password.**
 - Initial setup page: `/setup`
 - To prevent unauthorised registration, set the `SETUP_TOKEN` environment variable to a long secret first. Only someone who knows that token can create the initial administrator. After creating the admin account, `/setup` is disabled.
+
+.company-brand {
+  text-align: center;
+  margin-bottom: 25px;
+}
+
+.company-logo {
+  width: 140px;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  margin-bottom: 10px;
+}
+
+.company-brand h2 {
+  font-size: 20px;
+  color: #1f5f78;
+}
 
 ## Deploy to Render from GitHub
 
