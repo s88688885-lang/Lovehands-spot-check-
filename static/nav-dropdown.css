@@ -1,0 +1,12 @@
+/* Lovehands navigation enhancement: two grouped dropdown menus. */
+.nav-menu{position:relative;display:inline-block;font-size:13px;font-weight:650;color:var(--ink);}
+.nav-menu summary{cursor:pointer;display:inline-flex;align-items:center;gap:7px;list-style:none;padding:7px 0;white-space:nowrap;user-select:none;}
+.nav-menu summary::-webkit-details-marker{display:none;}
+.nav-menu summary:focus-visible,.nav-dropdown a:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px;}
+.chevron{font-size:12px;transition:transform .15s ease;}
+.nav-menu[open] .chevron{transform:rotate(180deg);}
+.nav-dropdown{position:absolute;top:calc(100% + 6px);left:0;min-width:205px;z-index:30;border:1px solid var(--line);border-radius:10px;background:white;box-shadow:0 12px 28px rgba(30,40,50,.14);padding:6px;}
+.nav-dropdown a{display:block;padding:10px 11px;border-radius:7px;text-decoration:none;font-weight:600;color:var(--ink);white-space:nowrap;}
+.nav-dropdown a:hover{background:var(--bg);color:var(--blue);}
+@media(max-width:780px){.nav-menu{position:relative}.nav-dropdown{left:0;min-width:195px}}
+@media print{.nav-menu{display:none}}
