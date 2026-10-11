@@ -1,1 +1,29 @@
 .menu{position:relative;display:inline-block}.menu-trigger{border:0;background:transparent;color:var(--ink);font-size:13px;font-weight:650;cursor:pointer;padding:9px}.menu-panel{display:none;position:absolute;z-index:50;min-width:220px;background:white;box-shadow:0 8px 28px #0002;border:1px solid #ddd;border-radius:9px;padding:8px}.menu:focus-within .menu-panel,.menu:hover .menu-panel{display:block}.menu-panel a{display:block;padding:9px;text-decoration:none}.menu-panel a:hover{background:#edf5ed}.print-logo{display:none}.admin-actions{display:flex;gap:10px;align-items:center;margin-bottom:15px}.danger{background:#b3261e;color:white}.draft-status{background:#f0f8e9;border:1px solid #d5e8ba;border-radius:9px;padding:10px;margin-bottom:12px}@media print{.print-logo{display:block;text-align:center;margin:0 0 22px}.print-logo img{max-width:270px;max-height:130px;object-fit:contain}.admin-actions,.draft-status{display:none!important}.card{break-inside:auto}.question,.answer{break-inside:avoid}header{display:none}}
+/* Repeat the original Lovehands logo at the top-left of EVERY printed page.
+   Fixed elements repeat on paginated print output in Chromium-based browsers. */
+@page { size: auto; margin: 36mm 15mm 18mm 15mm; }
+@media print {
+  .print-logo {
+    display: block !important;
+    position: fixed;
+    top: -29mm;
+    left: 0;
+    width: 70mm;
+    height: 22mm;
+    margin: 0 !important;
+    padding: 0;
+    text-align: left;
+    break-inside: avoid;
+    z-index: 10;
+  }
+  .print-logo img {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 70mm;
+    max-height: 22mm;
+    object-fit: contain;
+    object-position: top left;
+  }
+  main { padding-top: 0 !important; }
+}

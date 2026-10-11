@@ -65,3 +65,7 @@ The form follows the uploaded three-page medication assessment, including traini
 - Printable report pages include the original unchanged `static/logo.png`.
 - No changes are required to existing accounts, passwords, or database connection settings. Database tables are added using create_all().
 - Back up your PostgreSQL database before deploying, and verify the security and draft recovery workflows on staging before operational use.
+
+## Printed page branding
+
+Spot Check and Medication Competency record detail pages now display the **original, unedited** Lovehands logo fixed in the upper-left print header. The print layout reserves top margin on every sheet and repeats the image on subsequent printed/PDF pages in browsers that support repeated fixed-position print elements (e.g. Chrome/Edge). To check, open a completed record, choose Print / Save PDF and review pages 1, 2 and later pages in Print Preview. Print behavior may vary by browser and print engine. Browser-generated headers/footers can be turned off in the print dialog to keep the document tidy.
