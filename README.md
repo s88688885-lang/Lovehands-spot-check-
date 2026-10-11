@@ -55,3 +55,13 @@ This release adds a second questionnaire without changing the Spot Check or exis
 - `/admin/medication-export.csv` — administrator-only export
 
 The form follows the uploaded three-page medication assessment, including training/policy, 18 practical medication questions, staff conversation, three competency outcomes, typed acknowledgements, and next assessment date. Typed signatures are not cryptographically verified digital signatures. As with the original package, complete security, data protection and deployment testing before recording real service-user data.
+
+
+## October 2026 additions
+- Grouped New Assessment and Records dropdowns.
+- Five-minute inactivity logout: client countdown plus server-session timestamp enforcement; the server does not extend the session on draft save.
+- Autosaved, account-specific drafts in the `assessment_draft` database table, restored on return.
+- Administrator edit and delete operations for both form types, with snapshots in `assessment_audit`; deletion irreversibly removes active records but retains snapshots.
+- Printable report pages include the original unchanged `static/logo.png`.
+- No changes are required to existing accounts, passwords, or database connection settings. Database tables are added using create_all().
+- Back up your PostgreSQL database before deploying, and verify the security and draft recovery workflows on staging before operational use.

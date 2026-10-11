@@ -1,6 +1,6 @@
 import os, csv, io, json, secrets, datetime
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, Response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, abort, Response, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -107,6 +107,26 @@ class MedicationSubmission(db.Model):
     next_assessment=db.Column(db.String(20),nullable=False)
     created_at=db.Column(db.DateTime,default=datetime.datetime.utcnow,nullable=False)
 
+class AssessmentDraft(db.Model):
+    __tablename__='assessment_draft'
+    id=db.Column(db.Integer,primary_key=True)
+    user_id=db.Column(db.Integer,db.ForeignKey('user.id'),nullable=False)
+    form_type=db.Column(db.String(20),nullable=False)
+    data=db.Column(db.Text,nullable=False,default='{}')
+    updated_at=db.Column(db.DateTime,default=datetime.datetime.utcnow,nullable=False)
+    __table_args__=(db.UniqueConstraint('user_id','form_type',name='unique_draft_user_form'),)
+
+class AssessmentAudit(db.Model):
+    __tablename__='assessment_audit'
+    id=db.Column(db.Integer,primary_key=True)
+    actor_id=db.Column(db.Integer,db.ForeignKey('user.id'),nullable=False)
+    form_type=db.Column(db.String(20),nullable=False)
+    record_id=db.Column(db.Integer,nullable=False)
+    event=db.Column(db.String(30),nullable=False)
+    previous_data=db.Column(db.Text,nullable=False)
+    replacement_data=db.Column(db.Text)
+    created_at=db.Column(db.DateTime,default=datetime.datetime.utcnow,nullable=False)
+
 with app.app_context(): db.create_all()
 
 def csrf():
@@ -117,7 +137,22 @@ app.jinja_env.globals['current_user_role']=lambda: (db.session.get(User,session[
 @app.before_request
 def csrf_check():
     if request.method=='POST':
-        if not secrets.compare_digest(request.form.get('_csrf',''),session.get('csrf','')): abort(400,description='Invalid form token. Refresh and retry.')
+        if not secrets.compare_digest((request.headers.get('X-CSRFToken','') if request.is_json else request.form.get('_csrf','')),session.get('csrf','')): abort(400,description='Invalid form token. Refresh and retry.')
+@app.before_request
+def enforce_idle_timeout():
+    if not session.get('uid'): return
+    now=datetime.datetime.now(datetime.timezone.utc).timestamp()
+    last=session.get('last_activity',now)
+    if now-last>=300:
+        session.clear()
+        if request.path.startswith('/api/'):
+            return jsonify(error='Session expired',expired=True),401
+        flash('You were signed out after five minutes of inactivity. Your saved draft is available when you sign back in.','error')
+        return redirect(url_for('login'))
+    # Saving a draft is not user activity; only interactive events renew the server session.
+    if request.endpoint not in ('save_draft','load_draft','session_status'):
+        session['last_activity']=now
+
 @app.after_request
 def headers(response):
     response.headers['X-Frame-Options']='DENY'
@@ -171,7 +206,7 @@ def login():
         username=request.form.get('username','').strip().lower()
         u=User.query.filter_by(username=username,active=True).first()
         if u and check_password_hash(u.password_hash,request.form.get('password','')):
-            session.clear();session.permanent=True;session['uid']=u.id;session['csrf']=secrets.token_urlsafe(32)
+            session.clear();session.permanent=True;session['uid']=u.id;session['csrf']=secrets.token_urlsafe(32);session['last_activity']=datetime.datetime.now(datetime.timezone.utc).timestamp()
             return redirect(url_for('dashboard') if u.role=='admin' else url_for('new_check'))
         flash('Invalid username or password.','error')
     return render_template('login.html')
@@ -202,7 +237,7 @@ def new_check():
             else:
                 actions=[{'action':request.form.get(f'action_{i}','').strip()[:3000],'by':request.form.get(f'action_by_{i}','').strip()[:160]} for i in range(1,8)]
                 record=Submission(assessor_id=user.id,service_user=request.form['service_user'].strip()[:160],care_workers=request.form['care_workers'].strip()[:500],spot_date=request.form['spot_date'],arrive=request.form.get('arrive'),depart=request.form.get('depart'),reason=request.form['reason'].strip()[:160],outcome=request.form['outcome'],answers=json.dumps(answers),actions=json.dumps(actions),signature=request.form['signature'].strip()[:160])
-                db.session.add(record);db.session.commit();flash(f'Spot check #{record.id} submitted successfully.','success');return redirect(url_for('my_submissions'))
+                db.session.add(record);db.session.flush();AssessmentDraft.query.filter_by(user_id=user.id,form_type='spot').delete();db.session.commit();flash(f'Spot check #{record.id} submitted successfully.','success');return redirect(url_for('my_submissions'))
     return render_template('form.html',sections=SECTIONS,user=user)
 
 @app.route('/my-submissions')
@@ -322,7 +357,7 @@ def new_medication():
                 assessor_signature=request.form['assessor_signature'].strip()[:160],
                 staff_signature=request.form['staff_signature'].strip()[:160],
                 next_assessment=request.form['next_assessment'])
-            db.session.add(record);db.session.commit()
+            db.session.add(record);db.session.flush();AssessmentDraft.query.filter_by(user_id=user.id,form_type='medication').delete();db.session.commit()
             flash(f'Medication competency #{record.id} submitted successfully.','success')
             return redirect(url_for('medication_records'))
     return render_template('medication_form.html',user=user,sections=MEDICATION_SECTIONS,outcome_questions=MEDICATION_OUTCOMES)
@@ -355,5 +390,128 @@ def medication_export_csv():
         writer.writerow([r.id,r.created_at.isoformat(),r.assessment_date,r.staff_name,r.assessor_name,
                          outcomes[0]['answer'],outcomes[1]['answer'],outcomes[2]['answer'],r.next_assessment])
     return Response(output.getvalue(),mimetype='text/csv',headers={'Content-Disposition':'attachment; filename=lovehands-medication-competency-summary.csv'})
+
+
+@app.route('/drafts')
+@logged_in
+def drafts():
+    return render_template('drafts.html',drafts=AssessmentDraft.query.filter_by(user_id=session['uid']).order_by(AssessmentDraft.updated_at.desc()).all())
+
+# Draft endpoints are limited to the logged-in user and never expose records to others.
+@app.route('/api/draft/<form_type>',methods=['GET','POST'])
+@logged_in
+def save_draft(form_type):
+    if form_type not in ('spot','medication'):abort(404)
+    draft=AssessmentDraft.query.filter_by(user_id=session['uid'],form_type=form_type).first()
+    if request.method=='GET':
+        return jsonify(data=json.loads(draft.data) if draft else {},saved_at=draft.updated_at.isoformat() if draft else None)
+    payload=request.get_json(silent=True)
+    if not isinstance(payload,dict) or len(json.dumps(payload))>100000:abort(400)
+    if not draft:
+        draft=AssessmentDraft(user_id=session['uid'],form_type=form_type)
+        db.session.add(draft)
+    draft.data=json.dumps(payload)
+    draft.updated_at=datetime.datetime.utcnow()
+    db.session.commit()
+    return jsonify(ok=True,saved_at=draft.updated_at.isoformat())
+
+@app.route('/api/heartbeat',methods=['POST'])
+@logged_in
+def heartbeat():
+    return jsonify(ok=True)
+
+@app.route('/api/session-status')
+@logged_in
+def session_status():
+    return jsonify(ok=True)
+
+def audit_snapshot(record):
+    if isinstance(record,Submission):
+        fields=('id','assessor_id','service_user','care_workers','spot_date','arrive','depart','reason','outcome','answers','actions','signature','created_at')
+    else:
+        fields=('id','assessor_id','staff_name','assessment_date','answers','notes','outcomes','assessor_name','assessor_signature','staff_signature','next_assessment','created_at')
+    return {key: str(getattr(record,key)) if isinstance(getattr(record,key),datetime.datetime) else getattr(record,key) for key in fields}
+
+def get_managed(form_type,record_id):
+    model={'spot':Submission,'medication':MedicationSubmission}.get(form_type)
+    if not model:abort(404)
+    record=db.session.get(model,record_id)
+    if not record:abort(404)
+    return record
+
+def extract_edit(form_type):
+    if form_type=='spot':
+        required=('service_user','care_workers','spot_date','reason','outcome','signature')
+        if any(not request.form.get(k,'').strip() for k in required):return None
+        answers=[]
+        for si,(title,questions) in enumerate(SECTIONS):
+            for qi,q in enumerate(questions):
+                k=f'q_{si}_{qi}';v=request.form.get(k,'')
+                if v not in ('Yes','No','N/A'):return None
+                answers.append({'section':title,'question':q,'answer':v,'comment':request.form.get(k+'_comment','')[:3000]})
+        if request.form['outcome'] not in ('Passed','Failed'):return None
+        actions=[{'action':request.form.get(f'action_{i}','')[:3000],'by':request.form.get(f'action_by_{i}','')[:160]} for i in range(1,8)]
+        return dict(service_user=request.form['service_user'][:160],care_workers=request.form['care_workers'][:500],spot_date=request.form['spot_date'],arrive=request.form.get('arrive'),depart=request.form.get('depart'),reason=request.form['reason'][:160],outcome=request.form['outcome'],answers=json.dumps(answers),actions=json.dumps(actions),signature=request.form['signature'][:160])
+    required=('staff_name','assessment_date','assessor_name','assessor_signature','staff_signature','next_assessment')
+    if any(not request.form.get(k,'').strip() for k in required):return None
+    answers=[]
+    for si,(section,questions) in enumerate(MEDICATION_SECTIONS):
+        for qi,q in enumerate(questions):
+            v=request.form.get(f'm_{si}_{qi}','')
+            if v not in (('Yes','No','N/A') if (si,qi)==(1,9) else ('Yes','No')):return None
+            answers.append({'section':section,'question':q,'answer':v})
+    outcomes=[]
+    for i,q in enumerate(MEDICATION_OUTCOMES):
+        v=request.form.get(f'outcome_{i}','')
+        if v not in ('Yes','No'):return None
+        outcomes.append({'question':q,'answer':v,'signed':request.form.get(f'outcome_signed_{i}','')[:160]})
+    return dict(staff_name=request.form['staff_name'][:160],assessment_date=request.form['assessment_date'],answers=json.dumps(answers),notes=request.form.get('notes','')[:10000],outcomes=json.dumps(outcomes),assessor_name=request.form['assessor_name'][:160],assessor_signature=request.form['assessor_signature'][:160],staff_signature=request.form['staff_signature'][:160],next_assessment=request.form['next_assessment'])
+
+@app.route('/admin/record/<form_type>/<int:record_id>/edit',methods=['GET','POST'])
+@admin_only
+def edit_record(form_type,record_id):
+    r=get_managed(form_type,record_id)
+    if request.method=='POST':
+        fields=extract_edit(form_type)
+        if fields is None:
+            flash('Complete all required assessment fields.','error')
+        else:
+            previous=audit_snapshot(r)
+            for k,v in fields.items():setattr(r,k,v)
+            db.session.add(AssessmentAudit(actor_id=session['uid'],form_type=form_type,record_id=record_id,event='edited',previous_data=json.dumps(previous),replacement_data=json.dumps(audit_snapshot(r))))
+            db.session.commit();flash('Assessment updated. Original values retained in audit history.','success')
+            return redirect(url_for('detail' if form_type=='spot' else 'medication_detail',record_id=record_id))
+    if form_type=='spot':
+        payload={k:getattr(r,k) for k in ('service_user','care_workers','spot_date','arrive','depart','reason','outcome','signature')}
+        for si,(title,questions) in enumerate(SECTIONS):
+            for qi,q in enumerate(questions):
+                ans=json.loads(r.answers)[sum(len(t[1]) for t in SECTIONS[:si])+qi]
+                payload[f'q_{si}_{qi}']=ans['answer'];payload[f'q_{si}_{qi}_comment']=ans.get('comment','')
+        for i,x in enumerate(json.loads(r.actions),1):payload[f'action_{i}']=x.get('action','');payload[f'action_by_{i}']=x.get('by','')
+        return render_template('form.html',sections=SECTIONS,user=db.session.get(User,r.assessor_id),editing=True,initial=payload,action_url=url_for('edit_record',form_type=form_type,record_id=record_id))
+    payload={k:getattr(r,k) for k in ('staff_name','assessment_date','notes','assessor_name','assessor_signature','staff_signature','next_assessment')}
+    ix=0
+    for si,(title,questions) in enumerate(MEDICATION_SECTIONS):
+        for qi,q in enumerate(questions):payload[f'm_{si}_{qi}']=json.loads(r.answers)[ix]['answer'];ix+=1
+    for i,v in enumerate(json.loads(r.outcomes)):
+        payload[f'outcome_{i}']=v['answer'];payload[f'outcome_signed_{i}']=v.get('signed','')
+    return render_template('medication_form.html',sections=MEDICATION_SECTIONS,outcome_questions=MEDICATION_OUTCOMES,user=db.session.get(User,r.assessor_id),editing=True,initial=payload,action_url=url_for('edit_record',form_type=form_type,record_id=record_id))
+
+@app.route('/admin/record/<form_type>/<int:record_id>/delete',methods=['POST'])
+@admin_only
+def delete_record(form_type,record_id):
+    r=get_managed(form_type,record_id)
+    if request.form.get('confirmation')!='DELETE':abort(400)
+    snapshot=audit_snapshot(r)
+    db.session.add(AssessmentAudit(actor_id=session['uid'],form_type=form_type,record_id=record_id,event='deleted',previous_data=json.dumps(snapshot)))
+    db.session.delete(r);db.session.commit()
+    flash('Assessment deleted. A full audit snapshot has been retained.','success')
+    return redirect(url_for('dashboard' if form_type=='spot' else 'medication_records'))
+
+@app.route('/admin/audit')
+@admin_only
+def audit_history():
+    logs=AssessmentAudit.query.order_by(AssessmentAudit.created_at.desc()).limit(500).all()
+    return render_template('audit.html',logs=logs)
 
 if __name__=='__main__': app.run(debug=os.environ.get('FLASK_DEBUG')=='1')
