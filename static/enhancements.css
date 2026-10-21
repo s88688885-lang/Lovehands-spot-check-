@@ -29,3 +29,25 @@
   }
   .card { break-inside: auto; }
 }
+
+/* Reliable repeating print image: the table's THEAD is repeated by browser
+   paged-media layout. Fixed-position elements are not reliable in print. */
+.assessment-print-pages{display:block;border:0;width:100%;border-collapse:collapse}
+.assessment-print-pages>thead{display:none}
+.assessment-print-pages>tbody,.assessment-print-pages>tbody>tr,.assessment-print-pages>tbody>tr>.assessment-print-body{display:block;width:100%;border:0;padding:0}
+@media print{
+  @page{size:auto;margin:12mm 13mm 14mm 13mm}
+  .print-logo{display:none!important}
+  .assessment-print-pages{display:table!important;table-layout:fixed!important;width:100%!important;border-collapse:collapse!important;border:0!important}
+  .assessment-print-pages>thead{display:table-header-group!important}
+  .assessment-print-pages>thead>tr{display:table-row!important}
+  .assessment-print-pages>thead>tr>td{display:table-cell!important;height:23mm!important;padding:0 0 4mm 0!important;border:0!important;vertical-align:top!important;background:#fff!important}
+  .assessment-print-pages>tbody{display:table-row-group!important}
+  .assessment-print-pages>tbody>tr{display:table-row!important}
+  .assessment-print-pages>tbody>tr>.assessment-print-body{display:table-cell!important;padding:0!important;border:0!important;width:auto!important}
+  .repeating-print-logo{display:block!important;height:19mm!important;text-align:right!important;background:white!important}
+  .repeating-print-logo img{display:inline-block!important;object-fit:contain!important;object-position:right center!important;width:55mm!important;height:18mm!important;max-width:55mm!important;max-height:18mm!important}
+  .card{break-inside:auto!important}
+  .question,.answer{break-inside:avoid}
+  .assessment-print-pages thead img{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}

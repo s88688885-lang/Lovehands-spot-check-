@@ -69,3 +69,7 @@ The form follows the uploaded three-page medication assessment, including traini
 ## Printed page branding
 
 Spot Check and Medication Competency record detail pages now display the **original, unedited** Lovehands logo fixed in the upper-left print header. The print layout reserves top margin on every sheet and repeats the image on subsequent printed/PDF pages in browsers that support repeated fixed-position print elements (e.g. Chrome/Edge). To check, open a completed record, choose Print / Save PDF and review pages 1, 2 and later pages in Print Preview. Print behavior may vary by browser and print engine. Browser-generated headers/footers can be turned off in the print dialog to keep the document tidy.
+
+## Print logo fix — repeating top-right header
+
+The Spot Check and Medication Assessment forms and completed-record pages use a print-only table header (`assessment-print-pages > thead`) to place the original `static/logo.png` at the top-right of every printed page. Unlike CSS `position: fixed`, the repeated table header is treated as part of the paginated document layout. A 6-page test with WeasyPrint verified an image on each page. Test the browser's Print Preview after deploying, and use Save as PDF from the same print dialog. The website authentication, database models and routes were not changed in this fix.
