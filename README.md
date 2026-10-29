@@ -73,7 +73,3 @@ Spot Check and Medication Competency record detail pages now display the **origi
 ## Print logo fix — repeating top-right header
 
 The Spot Check and Medication Assessment forms and completed-record pages use a print-only table header (`assessment-print-pages > thead`) to place the original `static/logo.png` at the top-right of every printed page. Unlike CSS `position: fixed`, the repeated table header is treated as part of the paginated document layout. A 6-page test with WeasyPrint verified an image on each page. Test the browser's Print Preview after deploying, and use Save as PDF from the same print dialog. The website authentication, database models and routes were not changed in this fix.
-
-## Important database reliability update (October 2026)
-
-See `DATABASE_SAFETY_GUIDE.md` **before deploying**. This version blocks unsafe production fallback to SQLite and a random app secret. Existing database addresses and credentials must remain unchanged. A persistent database with tested backups is still required.

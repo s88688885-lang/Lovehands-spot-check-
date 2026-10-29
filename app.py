@@ -5,28 +5,10 @@ from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app=Flask(__name__)
-# Fail closed on hosted deployments: a missing database URL must NEVER cause
-# a new temporary SQLite database to be created and impersonate an empty system.
-hosted = bool(os.environ.get('RENDER') or os.environ.get('PRODUCTION') == '1')
-db_url = os.environ.get('DATABASE_URL', '').strip()
-secret_key = os.environ.get('SECRET_KEY', '').strip()
-if hosted:
-    if not db_url:
-        raise RuntimeError('SAFE STARTUP BLOCKED: DATABASE_URL is missing. Restore the ORIGINAL existing PostgreSQL connection URL in Render. Do not create a new database.')
-    if not (db_url.startswith('postgres://') or db_url.startswith('postgresql://') or db_url.startswith('postgresql+psycopg://')):
-        raise RuntimeError('SAFE STARTUP BLOCKED: a persistent PostgreSQL DATABASE_URL is required on Render. SQLite is not permitted.')
-    if len(secret_key) < 32:
-        raise RuntimeError('SAFE STARTUP BLOCKED: set a STABLE SECRET_KEY of at least 32 characters in Render. Keep the same value across deploys.')
-else:
-    if not db_url:
-        db_url = 'sqlite:///lovehands.db'  # developer machines only
-    if not secret_key:
-        secret_key = 'development-only-do-not-use-on-render'
-if db_url.startswith('postgres://'):
-    db_url = 'postgresql://' + db_url[len('postgres://'):]
-app.config['SECRET_KEY'] = secret_key
-app.config['SQLALCHEMY_DATABASE_URI'] = db_url
-app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_pre_ping': True, 'pool_recycle': 1800} if db_url.startswith('postgresql') else {}
+app.config['SECRET_KEY']=os.environ.get('SECRET_KEY') or secrets.token_hex(32)
+db_url=os.environ.get('DATABASE_URL', 'sqlite:///lovehands.db')
+if db_url.startswith('postgres://'): db_url='postgresql://'+db_url[len('postgres://'):]
+app.config['SQLALCHEMY_DATABASE_URI']=db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS']=False
 app.config['SESSION_COOKIE_HTTPONLY']=True
 app.config['SESSION_COOKIE_SAMESITE']='Lax'
@@ -145,25 +127,7 @@ class AssessmentAudit(db.Model):
     replacement_data=db.Column(db.Text)
     created_at=db.Column(db.DateTime,default=datetime.datetime.utcnow,nullable=False)
 
-class InstallationState(db.Model):
-    __tablename__ = 'installation_state'
-    id = db.Column(db.Integer, primary_key=True)
-    initialized = db.Column(db.Boolean, nullable=False, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow, nullable=False)
-
-with app.app_context():
-    db.create_all()
-    # A marker helps detect an unexpectedly empty user table on a previously
-    # initialized database; no user records are ever recreated or deleted here.
-    state = db.session.get(InstallationState, 1)
-    if state is None:
-        state = InstallationState(id=1, initialized=bool(User.query.first()))
-        db.session.add(state)
-        db.session.commit()
-    elif User.query.first() and not state.initialized:
-        state.initialized = True
-        db.session.commit()
-
+with app.app_context(): db.create_all()
 
 def csrf():
     if 'csrf' not in session: session['csrf']=secrets.token_urlsafe(32)
@@ -217,16 +181,13 @@ def admin_only(view):
 
 @app.route('/')
 def index():
-    if not User.query.filter_by(role='admin').first():
-        if db.session.get(InstallationState,1).initialized: abort(503, description='Previously configured admin is missing. Check original PostgreSQL database before attempting setup.')
-        return redirect(url_for('setup'))
+    if not User.query.filter_by(role='admin').first():return redirect(url_for('setup'))
     if not session.get('uid'):return redirect(url_for('login'))
     return redirect(url_for('dashboard') if db.session.get(User,session['uid']).role=='admin' else url_for('new_check'))
 
 @app.route('/setup',methods=['GET','POST'])
 def setup():
     if User.query.filter_by(role='admin').first():abort(404)
-    if db.session.get(InstallationState,1).initialized: abort(503, description='Previously initialized installation has no administrator. Contact support and restore the existing database; setup is locked to avoid overwriting data.')
     token=os.environ.get('SETUP_TOKEN','')
     if not token:return render_template('setup_disabled.html'),503
     if request.method=='POST':
@@ -236,7 +197,7 @@ def setup():
         elif not request.form.get('full_name','').strip():flash('Enter your full name.','error')
         else:
             u=User(username='admin',full_name=request.form['full_name'].strip(),role='admin',password_hash=generate_password_hash(request.form['password'],method='scrypt'))
-            db.session.add(u);state=db.session.get(InstallationState,1);state.initialized=True;db.session.commit();flash('Administrator created. Please sign in.','success');return redirect(url_for('login'))
+            db.session.add(u);db.session.commit();flash('Administrator created. Please sign in.','success');return redirect(url_for('login'))
     return render_template('setup.html')
 
 @app.route('/login',methods=['GET','POST'])
